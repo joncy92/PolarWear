@@ -3,25 +3,29 @@ package com.spartantech.polarwear
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
-import android.graphics.Paint
-import android.graphics.Typeface
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.* // Imports remember, LaunchedEffect, mutableStateOf
+import androidx.compose.runtime.getValue // Required for 'by' delegation
+import androidx.compose.runtime.setValue // Required for 'by' delegation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -36,27 +40,14 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
 
-// DEPENDENCIES NEEDED IN build.gradle (Module: app):
-// implementation("androidx.wear.compose:compose-material:1.2.0")
-// implementation("androidx.wear.compose:compose-foundation:1.2.0")
-// implementation("com.google.android.gms:play-services-location:21.0.1")
-// implementation("androidx.activity:activity-compose:1.7.2")
+// --- TROUBLESHOOTING ---
+// 1. If "package" line is red, ensure file is in: app/src/main/java/com/spartantech/polarwear/
+// 2. If imports are red, File > Sync Project with Gradle Files.
 
 class MainActivity : ComponentActivity() {
 
-    private val locationPermissionRequest = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // Handle permissions
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        locationPermissionRequest.launch(arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ))
 
         setContent {
             MaterialTheme {
@@ -80,20 +71,37 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@SuppressLint("DefaultLocale")
+@SuppressLint("AutoboxingStateCreation")
 @Composable
 fun WatchApp(toggleTorch: (Boolean) -> Unit) {
     // --- STATE ---
-    var time by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var time by remember { mutableStateOf(System.currentTimeMillis()) }
     var latitude by remember { mutableDoubleStateOf(0.0) }
-    var longitude by remember { mutableDoubleStateOf(0.0) }
-    var altitude by remember { mutableDoubleStateOf(0.0) }
+    var longitude by remember { mutableStateOf(0.0) }
+    var altitude by remember { mutableStateOf(0.0) }
     var isTorchOn by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // Timer Loop
+    // --- PERMISSIONS ---
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        // Permissions handled
+    }
+
+    // Request permissions on start
+    LaunchedEffect(Unit) {
+        permissionLauncher.launch(arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ))
+    }
+
+    // --- TIMERS & LOOPS ---
+
+    // 1. Time Loop
     LaunchedEffect(Unit) {
         while(true) {
             time = System.currentTimeMillis()
@@ -101,7 +109,7 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
         }
     }
 
-    // GPS Loop
+    // 2. GPS Loop
     LaunchedEffect(Unit) {
         while(true) {
             val hasPermission = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -119,7 +127,7 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
         }
     }
 
-    // Sync Torch
+    // 3. Torch Sync
     LaunchedEffect(isTorchOn) {
         toggleTorch(isTorchOn)
     }
@@ -129,7 +137,6 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
     val polarisHA = calculatePolarisHAFromLST(lstValue)
 
     // Convert HA to Screen Angle
-    // -90 (Top) - (HourAngle * 15) + 180 (Inverted View)
     val polarisAngle = -90f - (polarisHA.toFloat() * 15f) + 180f
 
     val timeString = remember(time) {
@@ -154,7 +161,8 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
         else {
             val latDir = if (latitude >= 0) "N" else "S"
             val lonDir = if (longitude >= 0) "E" else "W"
-            "${String.format("%.3f", abs(latitude))}°$latDir  ${String.format("%.3f", abs(longitude))}°$lonDir"
+            // Use Locale.US for dots instead of commas
+            "${String.format(Locale.US, "%.3f", abs(latitude))}°$latDir  ${String.format(Locale.US, "%.3f", abs(longitude))}°$lonDir"
         }
     }
 
@@ -187,7 +195,7 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
         } else {
             // --- CLOCK/SCOPE MODE ---
 
-            // Interaction Layer (Torch Only)
+            // Interaction Layer (Torch Only - No Rotation)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -212,7 +220,6 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
                     val gapCenterRadius = (outerRingRadius + innerRingRadius) / 2
 
                     // --- LAYER 1: The Fixed Reticle (White Clock) ---
-                    // No rotation block here anymore
                     val clockColor = Color.White
 
                     // 1. Draw the Two Rings
@@ -261,11 +268,11 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
 
                     // 3. Draw Numbers 0, 3, 6, 9
                     drawIntoCanvas { canvas ->
-                        val paint = Paint().apply {
+                        val paint = android.graphics.Paint().apply {
                             color = android.graphics.Color.WHITE
-                            textAlign = Paint.Align.CENTER
+                            textAlign = android.graphics.Paint.Align.CENTER
                             textSize = 40f
-                            typeface = Typeface.DEFAULT_BOLD
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
                         }
 
                         fun drawLabel(text: String, angleDeg: Float) {
@@ -290,12 +297,32 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
                         center.y + gapCenterRadius * sin(polarisRad).toFloat()
                     )
 
-                    val indicatorColor = Color(0xFFFF6D00)
+                    // CHANGED: Vivid Yellow for high visibility
+                    val indicatorColor = Color.Yellow
 
-                    drawLine(indicatorColor, Offset(polarisPos.x - 12f, polarisPos.y), Offset(polarisPos.x + 12f, polarisPos.y), strokeWidth = 3f)
-                    drawLine(indicatorColor, Offset(polarisPos.x, polarisPos.y - 12f), Offset(polarisPos.x, polarisPos.y + 12f), strokeWidth = 3f)
+                    // CHANGED: Extended lines and REMOVED the ring to resemble a crosshair/reticle
+                    val crosshairSize = 30f // Made larger
 
-                    drawCircle(indicatorColor, radius = 8f, center = polarisPos)
+                    // Horizontal Line
+                    drawLine(
+                        color = indicatorColor,
+                        start = Offset(polarisPos.x - crosshairSize, polarisPos.y),
+                        end = Offset(polarisPos.x + crosshairSize, polarisPos.y),
+                        strokeWidth = 3f
+                    )
+
+                    // Vertical Line
+                    drawLine(
+                        color = indicatorColor,
+                        start = Offset(polarisPos.x, polarisPos.y - crosshairSize),
+                        end = Offset(polarisPos.x, polarisPos.y + crosshairSize),
+                        strokeWidth = 3f
+                    )
+
+                    // Reticle Ring removed
+
+                    // Center Dot
+                    drawCircle(indicatorColor, radius = 5f, center = polarisPos)
                 }
             }
 
@@ -321,7 +348,7 @@ fun WatchApp(toggleTorch: (Boolean) -> Unit) {
                 )
             }
 
-            // Info Panel (Aligned Bottom) - No Reset Button
+            // Info Panel (Aligned Bottom)
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -386,3 +413,30 @@ fun calculatePolarisHAFromLST(lst: Double): Double {
     val polarisRA = 2.98
     return (lst - polarisRA + 24) % 24
 }
+
+// --- ASSETS: FontAwesome Style Torch Icon ---
+val FontAwesomeTorchIcon: ImageVector = ImageVector.Builder(
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 512f,
+    viewportHeight = 512f
+).path(
+    fill = SolidColor(Color.White)
+) {
+    moveTo(320f, 64f)
+    lineTo(192f, 64f)
+    lineTo(160f, 192f)
+    lineTo(160f, 448f)
+    curveTo(160f, 465.7f, 174.3f, 480f, 192f, 480f)
+    lineTo(320f, 480f)
+    curveTo(337.7f, 480f, 352f, 465.7f, 352f, 448f)
+    lineTo(352f, 192f)
+    lineTo(320f, 64f)
+    close()
+    moveTo(192f, 32f)
+    lineTo(320f, 32f)
+    lineTo(336f, 0f)
+    lineTo(176f, 0f)
+    lineTo(192f, 32f)
+    close()
+}.build()
